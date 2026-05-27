@@ -41,6 +41,16 @@ jobs:
           fi
           chmod +x gradlew
 
+      - name: Restore Debug Keystore
+        run: |
+          if [ -f debug.keystore.base64 ]; then
+            echo "Restoring debug.keystore from debug.keystore.base64..."
+            base64 -d debug.keystore.base64 > debug.keystore
+          else
+            echo "debug.keystore.base64 not found in workspace!"
+            exit 1
+          fi
+
       - name: Build Split APKs (Debug mode)
         run: ./gradlew assembleDebug --stacktrace
 
