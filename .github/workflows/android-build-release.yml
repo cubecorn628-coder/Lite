@@ -1,0 +1,108 @@
+name: Android Build & Split Release
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build & Release Split APKs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Ensure Gradle Wrapper Exists
+        run: |
+          if [ ! -f gradlew ]; then
+            echo "Gradle wrapper not found, generating wrapper..."
+            gradle wrapper
+          fi
+          chmod +x gradlew
+
+      - name: Build Split APKs (Debug mode)
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Package and Rename Architecture Split APKs
+        id: prepare_apks
+        run: |
+          mkdir -p release-apks
+          
+          # Copy outputs from the Gradle build folder to our release directory
+          cp app/build/outputs/apk/debug/app-armeabi-v7a-debug.apk release-apks/FB_Wrapper_armeabi-v7a.apk || true
+          cp app/build/outputs/apk/debug/app-arm64-v8a-debug.apk release-apks/FB_Wrapper_arm64-v8a.apk || true
+          
+          echo "Output files ready for artifacts/release:"
+          ls -l release-apks/
+
+      - name: Upload APKs to Artifacts (For PR Actions)
+        uses: actions/upload-artifact@v4
+        with:
+          name: FB_Wrapper_Split_APKs
+          path: release-apks/
+
+      - name: Generate Simple Build Info
+        if: github.event_name == 'push'
+        id: build_info
+        run: |
+          echo "DATE=$(date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
+          echo "COMMIT_MSG=$(git log -1 --pretty=%B | head -n 1)" >> $GITHUB_ENV
+          echo "COMMIT_HASH=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+
+      - name: Create or Update GitHub Release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v1.0-${{ github.sha }}"
+          name: "FB Wrapper Build - ${{ env.COMMIT_HASH }}"
+          body: |
+            ### 📱 FB Wrapper Web Client: Build Info Sederhana
+            
+            Pembaruan otomatis telah berhasil di-compile oleh sistem otomatisasi integrasi. 
+            Detail rilis untuk build ini adalah sebagai berikut:
+            
+            - **Commit Hash:** `${{ env.COMMIT_HASH }}`
+            - **Commit Message:** `${{ env.COMMIT_MSG }}`
+            - **Cabang/Branch:** `${{ github.ref_name }}`
+            - **Waktu Build:** `${{ env.DATE }} (UTC)`
+            
+            ---
+            
+            #### 📦 Unduh File APK Terpisah Berdasarkan Arsitektur (ABI Splits):
+            Pilih file APK yang sesuai dengan jenis chipset/arsitektur handphone Anda untuk menjaga ukuran aplikasi tetap ringan dan berkinerja tinggi:
+            
+            1. **`FB_Wrapper_arm64-v8a.apk`**
+               * *Arsitektur:* **ARM 64-bit (Arm8 / Modern)**
+               * *Kecocokan:* Direkomendasikan untuk hampir semua tipe ponsel Android modern (keluaran tahun 2016 ke atas).
+            2. **`FB_Wrapper_armeabi-v7a.apk`**
+               * *Arsitektur:* **ARM 32-bit (Arm7 / Klasik)**
+               * *Kecocokan:* Sesuai untuk ponsel Android tipe lama atau berspesifikasi rendah (*low-end device*).
+            
+            *Dibuat secara ad-free dan bebas dari trackers eksternal.*
+          draft: false
+          prerelease: false
+          files: |
+            release-apks/FB_Wrapper_armeabi-v7a.apk
+            release-apks/FB_Wrapper_arm64-v8a.apk
+          token: ${{ secrets.GITHUB_TOKEN }}
