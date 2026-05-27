@@ -1,0 +1,6 @@
+{
+  "name": "FB Wrapper",
+  "description": "A lightweight, modern, ad-free Facebook Web Client wrapper with built-in blocker and download manager.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
