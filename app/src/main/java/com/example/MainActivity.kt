@@ -11,6 +11,7 @@ import android.os.Environment
 import android.view.View
 import android.webkit.CookieManager
 import android.webkit.URLUtil
+import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -63,6 +64,9 @@ class MainActivity : ComponentActivity() {
         if (!::webView.isInitialized) return
 
         try {
+            // Register JavaScript interface for handling local blob downloads
+            webView.addJavascriptInterface(BlobDownloadInterface(), "AndroidBlobDownloader")
+
             // Basic web settings configurations
             webView.settings.apply {
                 javaScriptEnabled = true
@@ -193,6 +197,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startDownloadProcess(url: String, userAgent: String, contentDisposition: String, mimetype: String) {
+        if (url.startsWith("blob:", ignoreCase = true)) {
+            handleBlobUrl(url, mimetype)
+            return
+        }
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
             // Write permission check for older versions (API <= 28)
             if (checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
@@ -285,6 +293,140 @@ class MainActivity : ComponentActivity() {
                 }
             }
         })
+    }
+
+    private fun handleBlobUrl(blobUrl: String, mimeType: String) {
+        val finalFileName = "fb_download_${System.currentTimeMillis()}"
+        val js = """
+            (function() {
+                var xhr = new XMLHttpRequest();
+                xhr.open('GET', '$blobUrl', true);
+                xhr.responseType = 'blob';
+                xhr.onload = function(e) {
+                    if (this.status == 200) {
+                        var blob = this.response;
+                        var reader = new FileReader();
+                        reader.readAsDataURL(blob);
+                        reader.onloadend = function() {
+                            var base64data = reader.result;
+                            AndroidBlobDownloader.downloadBlob(base64data, blob.type || '$mimeType', '$finalFileName');
+                        }
+                    }
+                };
+                xhr.onerror = function() {
+                    console.error("Blob fetch failed");
+                };
+                xhr.send();
+            })();
+        """.trimIndent()
+
+        runOnUiThread {
+            try {
+                if (::webView.isInitialized) {
+                    webView.evaluateJavascript(js, null)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    private fun saveBlobToFile(base64Data: String, mimeType: String, fileName: String) {
+        val pureBase64 = if (base64Data.contains(",")) {
+            base64Data.substring(base64Data.indexOf(",") + 1)
+        } else {
+            base64Data
+        }
+
+        val decodedBytes = try {
+            android.util.Base64.decode(pureBase64, android.util.Base64.DEFAULT)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            runOnUiThread {
+                if (!isFinishing) {
+                    Toast.makeText(this, "Failed to decode download data.", Toast.LENGTH_SHORT).show()
+                }
+            }
+            return
+        }
+
+        // Generate clean file name
+        var cleanFileName = fileName
+        if (cleanFileName.isEmpty()) {
+            cleanFileName = "fb_download_" + System.currentTimeMillis()
+            val ext = android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType)
+            if (!ext.isNullOrEmpty()) {
+                cleanFileName += "." + ext
+            } else {
+                cleanFileName += ".bin"
+            }
+        } else {
+            // Ensure proper file extension if missing
+            val ext = android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType)
+            if (!ext.isNullOrEmpty() && !cleanFileName.endsWith(".$ext", ignoreCase = true)) {
+                cleanFileName += "." + ext
+            }
+        }
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // Android 10 and above: Use ContentResolver and MediaStore Downloads
+                val contentValues = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, cleanFileName)
+                    put(android.provider.MediaStore.MediaColumns.MIME_TYPE, mimeType)
+                    put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                }
+
+                val uri = contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+                if (uri != null) {
+                    contentResolver.openOutputStream(uri)?.use { outputStream ->
+                        outputStream.write(decodedBytes)
+                    }
+                    runOnUiThread {
+                        if (!isFinishing) {
+                            Toast.makeText(this, "File saved to Downloads: $cleanFileName", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                } else {
+                    runOnUiThread {
+                        if (!isFinishing) {
+                            Toast.makeText(this, "Failed to create MediaStore entry.", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            } else {
+                // Android 9 and below: direct file writing
+                val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                if (!downloadsDir.exists()) {
+                    downloadsDir.mkdirs()
+                }
+                val file = java.io.File(downloadsDir, cleanFileName)
+                java.io.FileOutputStream(file).use { fos ->
+                    fos.write(decodedBytes)
+                }
+                runOnUiThread {
+                    if (!isFinishing) {
+                        Toast.makeText(this, "File saved to Downloads: $cleanFileName", Toast.LENGTH_LONG).show()
+                    }
+                }
+                // Notify scanner
+                android.media.MediaScannerConnection.scanFile(this, arrayOf(file.absolutePath), arrayOf(mimeType), null)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            runOnUiThread {
+                if (!isFinishing) {
+                    Toast.makeText(this, "Failed to save file: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    inner class BlobDownloadInterface {
+        @JavascriptInterface
+        fun downloadBlob(base64Data: String, mimeType: String, fileName: String) {
+            saveBlobToFile(base64Data, mimeType, fileName)
+        }
     }
 
     companion object {
