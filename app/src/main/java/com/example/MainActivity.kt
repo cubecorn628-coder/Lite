@@ -36,7 +36,20 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        
+        // Log all uncaught exceptions cleanly to system console
+        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            android.util.Log.e("FB_Wrapper_Crash", "Uncaught exception in thread " + thread.name, throwable)
+            defaultHandler?.uncaughtException(thread, throwable)
+        }
+
+        try {
+            enableEdgeToEdge()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
         setContentView(R.layout.activity_main)
 
         webView = findViewById(R.id.webView)
@@ -47,26 +60,41 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun setupWebView() {
-        // Basic web settings configurations
-        webView.settings.apply {
-            javaScriptEnabled = true
-            domStorageEnabled = true
-            databaseEnabled = true
-            useWideViewPort = true
-            loadWithOverviewMode = true
-            builtInZoomControls = true
-            displayZoomControls = false
-            javaScriptCanOpenWindowsAutomatically = true
-            mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-            
-            // Custom User-Agent exactly as specified
-            userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Mobile Safari/537.36"
+        if (!::webView.isInitialized) return
+
+        try {
+            // Basic web settings configurations
+            webView.settings.apply {
+                javaScriptEnabled = true
+                domStorageEnabled = true
+                databaseEnabled = true
+                useWideViewPort = true
+                loadWithOverviewMode = true
+                builtInZoomControls = true
+                displayZoomControls = false
+                javaScriptCanOpenWindowsAutomatically = true
+                
+                try {
+                    mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+                
+                // Custom User-Agent exactly as specified
+                userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Mobile Safari/537.36"
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
 
-        // Keep cookies enabled and synchronized
-        val cookieManager = CookieManager.getInstance()
-        cookieManager.setAcceptCookie(true)
-        cookieManager.setAcceptThirdPartyCookies(webView, true)
+        try {
+            // Keep cookies enabled and synchronized
+            val cookieManager = CookieManager.getInstance()
+            cookieManager.setAcceptCookie(true)
+            cookieManager.setAcceptThirdPartyCookies(webView, true)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
 
         // Setup clients
         webView.webViewClient = object : WebViewClient() {
@@ -77,12 +105,16 @@ class MainActivity : ComponentActivity() {
 
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                 super.onPageStarted(view, url, favicon)
-                progressBar.visibility = View.VISIBLE
+                if (::progressBar.isInitialized) {
+                    progressBar.visibility = View.VISIBLE
+                }
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
-                progressBar.visibility = View.GONE
+                if (::progressBar.isInitialized) {
+                    progressBar.visibility = View.GONE
+                }
 
                 // Advanced JS Injection (Element Blocker) as specified
                 // An IIFE with MutationObserver to continuously look for and remove specific DOM elements.
@@ -113,14 +145,21 @@ class MainActivity : ComponentActivity() {
                         });
                     })();
                 """.trimIndent()
-                view?.evaluateJavascript(js, null)
+                
+                try {
+                    view?.evaluateJavascript(js, null)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
             }
 
             override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
                 super.onReceivedError(view, request, error)
                 if (request?.isForMainFrame == true) {
                     runOnUiThread {
-                        Toast.makeText(this@MainActivity, "Connection failure. Please verify internet access.", Toast.LENGTH_SHORT).show()
+                        if (!isFinishing) {
+                            Toast.makeText(this@MainActivity, "Connection failure. Please verify internet access.", Toast.LENGTH_SHORT).show()
+                        }
                     }
                 }
             }
@@ -129,17 +168,23 @@ class MainActivity : ComponentActivity() {
         webView.webChromeClient = object : WebChromeClient() {
             override fun onProgressChanged(view: WebView?, newProgress: Int) {
                 super.onProgressChanged(view, newProgress)
-                progressBar.progress = newProgress
-                if (newProgress == 100) {
-                    progressBar.visibility = View.GONE
-                } else {
-                    progressBar.visibility = View.VISIBLE
+                if (::progressBar.isInitialized) {
+                    progressBar.progress = newProgress
+                    if (newProgress == 100) {
+                        progressBar.visibility = View.GONE
+                    } else {
+                        progressBar.visibility = View.VISIBLE
+                    }
                 }
             }
         }
 
         // Handled initial URL loading
-        webView.loadUrl("https://m.facebook.com")
+        try {
+            webView.loadUrl("https://m.facebook.com")
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
 
         // Intercept download URLs and route them to modern DownloadManager
         webView.setDownloadListener { url, userAgent, contentDisposition, mimetype, contentLength ->
@@ -190,11 +235,15 @@ class MainActivity : ComponentActivity() {
             downloadManager.enqueue(request)
 
             runOnUiThread {
-                Toast.makeText(this, "Download started: $fileName", Toast.LENGTH_SHORT).show()
+                if (!isFinishing) {
+                    Toast.makeText(this, "Download started: $fileName", Toast.LENGTH_SHORT).show()
+                }
             }
         } catch (e: Exception) {
             runOnUiThread {
-                Toast.makeText(this, "Failed to start download: ${e.message}", Toast.LENGTH_LONG).show()
+                if (!isFinishing) {
+                    Toast.makeText(this, "Failed to start download: ${e.message}", Toast.LENGTH_LONG).show()
+                }
             }
             e.printStackTrace()
         }
@@ -213,7 +262,9 @@ class MainActivity : ComponentActivity() {
                 }
             } else {
                 runOnUiThread {
-                    Toast.makeText(this, "Storage permission is required to save downloads.", Toast.LENGTH_LONG).show()
+                    if (!isFinishing) {
+                        Toast.makeText(this, "Storage permission is required to save downloads.", Toast.LENGTH_LONG).show()
+                    }
                 }
             }
             // Clear cache
@@ -227,7 +278,7 @@ class MainActivity : ComponentActivity() {
     private fun setupOnBackPressed() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (webView.canGoBack()) {
+                if (::webView.isInitialized && webView.canGoBack()) {
                     webView.goBack()
                 } else {
                     finish()
