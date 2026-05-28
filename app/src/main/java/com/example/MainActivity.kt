@@ -119,7 +119,9 @@ class MainActivity : ComponentActivity() {
             override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
                 super.onReceivedError(view, request, error)
                 if (request?.isForMainFrame == true) {
-                    Toast.makeText(this@MainActivity, "Connection failure. Please verify internet access.", Toast.LENGTH_SHORT).show()
+                    runOnUiThread {
+                        Toast.makeText(this@MainActivity, "Connection failure. Please verify internet access.", Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
         }
@@ -187,9 +189,13 @@ class MainActivity : ComponentActivity() {
             val downloadManager = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
             downloadManager.enqueue(request)
 
-            Toast.makeText(this, "Download started: $fileName", Toast.LENGTH_SHORT).show()
+            runOnUiThread {
+                Toast.makeText(this, "Download started: $fileName", Toast.LENGTH_SHORT).show()
+            }
         } catch (e: Exception) {
-            Toast.makeText(this, "Failed to start download: ${e.message}", Toast.LENGTH_LONG).show()
+            runOnUiThread {
+                Toast.makeText(this, "Failed to start download: ${e.message}", Toast.LENGTH_LONG).show()
+            }
             e.printStackTrace()
         }
     }
@@ -206,7 +212,9 @@ class MainActivity : ComponentActivity() {
                     enqueueDownload(url, ua, cd, mt)
                 }
             } else {
-                Toast.makeText(this, "Storage permission is required to save downloads.", Toast.LENGTH_LONG).show()
+                runOnUiThread {
+                    Toast.makeText(this, "Storage permission is required to save downloads.", Toast.LENGTH_LONG).show()
+                }
             }
             // Clear cache
             pendingDownloadUrl = null
@@ -222,8 +230,7 @@ class MainActivity : ComponentActivity() {
                 if (webView.canGoBack()) {
                     webView.goBack()
                 } else {
-                    isEnabled = false
-                    onBackPressedDispatcher.onBackPressed()
+                    finish()
                 }
             }
         })
